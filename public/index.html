@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Seat Booking</title>
+  <style>
+    #grid {
+      display: grid;
+      grid-template-columns: repeat(100, 20px);
+      grid-template-rows: repeat(100, 20px);
+      gap: 2px;
+    }
+    .seat {
+      width: 20px;
+      height: 20px;
+      background-color: green;
+    }
+    .seat.booked {
+      background-color: red;
+    }
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="login">
+    <input type="text" id="username" placeholder="Username">
+    <button onclick="login()">Login</button>
+  </div>
+  <div id="grid" style="display: none;"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    let seatsCache = Array(10000).fill(null); // 100x100 grid
+
+    function login() {
+      const username = document.getElementById('username').value;
+      fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+      })
+      .then(res => res.json())
+      .then(data => {
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('username', username);
+        console.log(`user logged in ${username}`)
+        authenticateSocket(data.token);
+      });
+    }
+
+    function authenticateSocket(token) {
+      socket.emit('authenticate', token);
+
+      socket.on('authenticated', (response) => {
+        console.log(seatsCache)
+        if (response.success) {
+          seatsCache = response.seats;
+          document.getElementById('login').classList.add('hidden');
+          document.getElementById('grid').style.display = 'grid';
+          renderSeats();
+        } else {
+          alert('Authentication failed. Please login again.');
+          localStorage.removeItem('token');
+          localStorage.removeItem('username');
+          document.getElementById('login').classList.remove('hidden');
+          document.getElementById('grid').style.display = 'none';
+        }
+      });
+    }
+
+    function renderSeats() {
+      const grid = document.getElementById('grid');
+      grid.innerHTML = '';
+      seatsCache.forEach((seat, index) => {
+        const seatElement = document.createElement('div');
+        seatElement.classList.add('seat');
+        if (seat !== null) seatElement.classList.add('booked');
+        seatElement.addEventListener('click', () => bookSeat(index));
+        grid.appendChild(seatElement);
+      });
+      console.log('seats rendered')
+    }
+
+    function bookSeat(seatIndex) {
+      const req = {
+        token: localStorage.getItem('token'),
+        seatIndex: seatIndex
+      }
+      socket.emit('bookSeat', { req });
+
+      socket.on('bookingSuccess', ({ username, seatIndex }) => {
+        alert(`Seat ${seatIndex} booked successfully by ${username}!`);
+        localStorage.removeItem('token');
+        localStorage.removeItem('username');
+        window.location.href = `/seat-details.html?username=${username}seat=${seatIndex}`;
+      });
+      socket.on('bookingFailed', () => {
+        alert('Seat booking failed. Please try again.');
+      });
+      socket.on('authError', () => {
+        alert('Authentication error. Please login again.');
+        localStorage.removeItem('token');
+        localStorage.removeItem('username');
+        document.getElementById('login').classList.remove('hidden');
+        document.getElementById('grid').style.display = 'none';
+      });
+    }
+
+    // Listen for real-time seat updates
+    socket.on('seatBooked', ({ seatIndex, username }) => {
+      console.log('seat booked');
+      seatsCache[seatIndex] = username;
+      renderSeats();
+    });
+
+    // On page load, check for token in local storage and authenticate socket
+    window.onload = () => {
+      console.log("Onload function called")
+      const token = localStorage.getItem('token');
+      if (token) {
+        authenticateSocket(token);
+      }
+    };
+  </script>
+</body>
+</html>
